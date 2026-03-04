@@ -1,0 +1,11 @@
+{
+    "alert_high": null,
+    "alert_low": null,
+    "sl_level": null,
+    "target_1": null,
+    "pending_long": false,
+    "pending_short": false,
+    "in_long": false,
+    "in_short": false,
+    "tp1_hit": false
+}
