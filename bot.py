@@ -67,8 +67,10 @@ class BotState:
 
 # Global references
 state = BotState()
+state.last_save_time = 0
 mudrex_executor = MudrexExecutor() if not dry_run else None
 historical_klines = []
+last_sync_time = 0
 
 def calculate_indicators(klines):
     """Calculates RSI and SMA from a list of kline dictionaries using pandas natively."""
@@ -104,6 +106,15 @@ def sync_mudrex_position():
         if state.in_long: return QTY_HALF if state.tp1_hit else QTY_TOTAL
         if state.in_short: return -QTY_HALF if state.tp1_hit else -QTY_TOTAL
         return 0.0
+
+    global last_sync_time
+    now = time.time()
+    if now - last_sync_time < 10: # Throttle Mudrex REST calls to protect WebSocket thread
+        if state.in_long: return QTY_HALF if state.tp1_hit else QTY_TOTAL
+        if state.in_short: return -QTY_HALF if state.tp1_hit else -QTY_TOTAL
+        return 0.0
+        
+    last_sync_time = now
 
     try:
         pos = mudrex_executor.get_open_position(MUDREX_SYMBOL)
@@ -264,7 +275,8 @@ def handle_kline_message(message):
                 logger.info(f"🔴 SHORT ALERT setup pending. Entry Low: {state.alert_low}, SL: {state.sl_level}")
 
         # Regular state saves and trailing updates (every 10 seconds to not spam APIs)
-        if int(time.time()) % 10 == 0:
+        if time.time() - state.last_save_time >= 10:
+            state.last_save_time = time.time()
             state.save()
             if not dry_run and state.tp1_hit and curr_sma:
                 pos = mudrex_executor.get_open_position(MUDREX_SYMBOL)
