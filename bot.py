@@ -22,9 +22,9 @@ logger = logging.getLogger(__name__)
 WS_SYMBOL = "BTCUSDT"     # PyBit WS symbol format
 MUDREX_SYMBOL = "BTCUSDT" # Mudrex symbol formatting
 KLINE_INTERVAL = "15"     # 15 minute interval for pybit
-QTY_TOTAL = 0.02
+QTY_TOTAL = 0.002         # 2 x 0.001 minimum order size (TP1 partial close requires taking half)
 QTY_HALF = QTY_TOTAL / 2.0
-LEVERAGE = 10
+LEVERAGE = 25             # 25x leverage to cover 0.002 BTC (~$140) with ~$6 margin
 MAX_DEPTH = 500.0
 
 RSI_LEN = 14
