@@ -1,4 +1,5 @@
 ccxt>=4.2.0
 pandas>=2.1.0
 python-dotenv>=1.0.0
+pybit
 # Mudrex SDK is installed separately from Git
