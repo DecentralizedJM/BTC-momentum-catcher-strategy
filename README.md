@@ -10,6 +10,24 @@ This repository contains the Python implementation of the **Stock Trade 360 - Mo
   - Takes 50% profit exactly at a 1:1 risk-reward ratio.
   - Dynamically trails the stop-loss limit against the 20-period SMA for maximum trend capture.
 
+## Architecture
+
+```mermaid
+graph TD
+    A[Bybit WebSocket API] -->|Real-time kline ticks| B(bot.py)
+    B -->|Calculate RSI/SMA & Check Triggers| B
+    B -- "Breakout Triggered (High/Low)" --> C[Mudrex Python SDK]
+    C -->|Place Market Order| D[Mudrex API]
+    
+    B -- "Price touches TP1 Target" --> C
+    C -->|Close 50% Position| D
+    
+    B -- "Price trends favorably" --> E{Trail Stop}
+    E -->|Update Stop Loss to 20 SMA| C
+    
+    F[(bot_state.json)] -.->|Persist pending orders & hits| B
+```
+
 ## Setup Instructions
 
 ### 1. Requirements
