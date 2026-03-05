@@ -82,17 +82,14 @@ def calculate_indicators(klines):
     # Calculate SMA
     sma = df['close'].rolling(window=SMA_LEN).mean().iloc[-1]
     
-    # Calculate RSI
+    # Calculate RSI (TradingView RMA method)
     delta = df['close'].diff()
-    gain = (delta.where(delta > 0, 0)).rolling(window=RSI_LEN).mean()
-    loss = (-delta.where(delta < 0, 0)).rolling(window=RSI_LEN).mean()
+    gain = delta.clip(lower=0)
+    loss = -1 * delta.clip(upper=0)
     
-    avg_gain = gain.copy()
-    avg_loss = loss.copy()
-    for i in range(RSI_LEN, len(df)):
-        avg_gain.iloc[i] = (avg_gain.iloc[i-1] * (RSI_LEN - 1) + gain.iloc[i]) / RSI_LEN
-        avg_loss.iloc[i] = (avg_loss.iloc[i-1] * (RSI_LEN - 1) + loss.iloc[i]) / RSI_LEN
-        
+    avg_gain = gain.ewm(alpha=1/RSI_LEN, min_periods=RSI_LEN, adjust=False).mean()
+    avg_loss = loss.ewm(alpha=1/RSI_LEN, min_periods=RSI_LEN, adjust=False).mean()
+    
     rs = avg_gain / avg_loss
     rsi = 100 - (100 / (1 + rs))
     
@@ -164,8 +161,8 @@ def handle_kline_message(message):
         else:
             historical_klines[-1] = kline
             
-        # Keep only necessary buffer
-        if len(historical_klines) > 100:
+        # Keep an extended buffer so the RSI RMA exponential smoothing doesn't drift
+        if len(historical_klines) > 500:
             historical_klines.pop(0)
 
         # 2. Check Triggers on EVERY TICK (Sub-second execution)
@@ -300,10 +297,11 @@ def main():
         logger.info("Running in LIVE mode. Orders WILL be executed on Mudrex.")
 
     # Populate initial historical klines utilizing Pybit REST so we don't have to wait 15m * 20 candles
+    # To get ultra-accurate TV RMA behavior, we need at least 250+ history candles to smooth the EMA math.
     from pybit.unified_trading import HTTP
     session = HTTP(testnet=False)
     try:
-        res = session.get_kline(category="linear", symbol=WS_SYMBOL, interval=KLINE_INTERVAL, limit=100)
+        res = session.get_kline(category="linear", symbol=WS_SYMBOL, interval=KLINE_INTERVAL, limit=500)
         for tick in reversed(res["result"]["list"]): # API returns newest first
             historical_klines.append({
                 "timestamp": int(tick[0]),
@@ -312,7 +310,7 @@ def main():
                 "low": float(tick[3]),
                 "close": float(tick[4])
             })
-        logger.info(f"Loaded {len(historical_klines)} historical candles.")
+        logger.info(f"Loaded {len(historical_klines)} historical candles to prime RSI RMA smoothing.")
     except Exception as e:
         logger.error(f"Failed to bootstrap historical data: {e}. Exiting.")
         return
