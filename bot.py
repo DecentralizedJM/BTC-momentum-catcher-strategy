@@ -250,8 +250,14 @@ def handle_kline_message(message):
             
             logger.info(f"Candle Closed | Price: {c_close} | RSI: {curr_rsi:.2f}")
 
-            # Check Alert Conditions
-            if c_close > c_open and curr_rsi > 60 and prev_rsi <= 60 and is_valid_depth:
+            # Check Alert Conditions (Exact crossover from TV)
+            # ta.crossover(RSI, 60) -> current RSI > 60 AND previous RSI <= 60
+            long_rsi_cross = curr_rsi > 60 and prev_rsi <= 60
+            
+            # ta.crossunder(RSI, 40) -> current RSI < 40 AND previous RSI >= 40
+            short_rsi_cross = curr_rsi < 40 and prev_rsi >= 40
+
+            if c_close > c_open and long_rsi_cross and is_valid_depth:
                 state.alert_high = kline['high']
                 state.alert_low = kline['low']
                 risk = state.alert_high - state.alert_low
@@ -261,7 +267,7 @@ def handle_kline_message(message):
                 state.pending_short = False
                 logger.info(f"🟢 LONG ALERT setup pending. Entry High: {state.alert_high}, SL: {state.sl_level}")
                 
-            elif c_close < c_open and curr_rsi < 40 and prev_rsi >= 40 and is_valid_depth:
+            elif c_close < c_open and short_rsi_cross and is_valid_depth:
                 state.alert_high = kline['high']
                 state.alert_low = kline['low']
                 risk = state.alert_high - state.alert_low
