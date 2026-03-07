@@ -29,6 +29,7 @@ MAX_DEPTH = 500.0
 
 RSI_LEN = 14
 SMA_LEN = 20
+SMA_200_LEN = 200
 
 STATE_FILE = "bot_state.json"
 dry_run = os.getenv("DRY_RUN", "true").lower() == "true"
@@ -82,6 +83,12 @@ def calculate_indicators(klines):
     # Calculate SMA
     sma = df['close'].rolling(window=SMA_LEN).mean().iloc[-1]
     
+    # Calculate SMA 200
+    sma200 = df['close'].rolling(window=SMA_200_LEN).mean().iloc[-1]
+    
+    # Calculate Volume MA (20 period)
+    vol_ma = df['volume'].rolling(window=20).mean().iloc[-1]
+    
     # Calculate RSI (TradingView RMA method)
     delta = df['close'].diff()
     gain = delta.clip(lower=0)
@@ -93,7 +100,7 @@ def calculate_indicators(klines):
     rs = avg_gain / avg_loss
     rsi = 100 - (100 / (1 + rs))
     
-    return float(rsi.iloc[-1]), float(sma)
+    return float(rsi.iloc[-1]), float(sma), float(sma200), float(vol_ma)
 
 
 def sync_mudrex_position():
@@ -153,7 +160,8 @@ def handle_kline_message(message):
             "open": float(tick["open"]),
             "high": float(tick["high"]),
             "low": float(tick["low"]),
-            "close": float(tick["close"])
+            "close": float(tick["close"]),
+            "volume": float(tick["volume"])
         }
         
         if len(historical_klines) == 0 or historical_klines[-1]["timestamp"] != kline["timestamp"]:
@@ -166,12 +174,13 @@ def handle_kline_message(message):
             historical_klines.pop(0)
 
         # 2. Check Triggers on EVERY TICK (Sub-second execution)
+        # Check Triggers on EVERY TICK (Sub-second execution)
         pos_size = sync_mudrex_position()
         curr_sma = None
         
         # We need SMA if we are trailing
-        if len(historical_klines) >= SMA_LEN:
-             _, curr_sma = calculate_indicators(historical_klines)
+        if len(historical_klines) >= SMA_200_LEN:
+             _, curr_sma, _, _ = calculate_indicators(historical_klines)
              
         # SEARCH FOR SETUPS (Pending Orders)
         if pos_size == 0.0:
@@ -239,16 +248,22 @@ def handle_kline_message(message):
                     state.reset()
 
         # 3. Handle End of Candle Logic to Assess NEW Alerts
-        if is_candle_closed and pos_size == 0.0 and len(historical_klines) >= RSI_LEN + 1:
+        if is_candle_closed and pos_size == 0.0 and len(historical_klines) >= SMA_200_LEN + 1:
             # We need previous candle for RSI trigger comparison
-            curr_rsi, _ = calculate_indicators(historical_klines)
-            prev_rsi, _ = calculate_indicators(historical_klines[:-1])
+            curr_rsi, _, curr_sma200, curr_vol_ma = calculate_indicators(historical_klines)
+            prev_rsi, _, prev_sma200, prev_vol_ma = calculate_indicators(historical_klines[:-1])
             
             candle_depth = kline['high'] - kline['low']
+            
+            # Trend and Vol Filters
             is_valid_depth = candle_depth <= MAX_DEPTH
+            is_valid_volume = kline['volume'] > (prev_vol_ma * 1.5)
+            is_uptrend = kline['close'] > prev_sma200
+            is_downtrend = kline['close'] < prev_sma200
+            
             c_close, c_open = kline['close'], kline['open']
             
-            logger.info(f"Candle Closed | Price: {c_close} | RSI: {curr_rsi:.2f}")
+            logger.info(f"Candle Closed | Price: {c_close} | RSI: {curr_rsi:.2f} | Valid Vol: {is_valid_volume} | Uptrend: {is_uptrend}")
 
             # Check Alert Conditions (Exact crossover from TV)
             # ta.crossover(RSI, 60) -> current RSI > 60 AND previous RSI <= 60
@@ -257,7 +272,7 @@ def handle_kline_message(message):
             # ta.crossunder(RSI, 40) -> current RSI < 40 AND previous RSI >= 40
             short_rsi_cross = curr_rsi < 40 and prev_rsi >= 40
 
-            if c_close > c_open and long_rsi_cross and is_valid_depth:
+            if c_close > c_open and long_rsi_cross and is_valid_depth and is_valid_volume and is_uptrend:
                 state.alert_high = kline['high']
                 state.alert_low = kline['low']
                 risk = state.alert_high - state.alert_low
@@ -267,7 +282,7 @@ def handle_kline_message(message):
                 state.pending_short = False
                 logger.info(f"🟢 LONG ALERT setup pending. Entry High: {state.alert_high}, SL: {state.sl_level}")
                 
-            elif c_close < c_open and short_rsi_cross and is_valid_depth:
+            elif c_close < c_open and short_rsi_cross and is_valid_depth and is_valid_volume and is_downtrend:
                 state.alert_high = kline['high']
                 state.alert_low = kline['low']
                 risk = state.alert_high - state.alert_low
@@ -314,7 +329,8 @@ def main():
                 "open": float(tick[1]),
                 "high": float(tick[2]),
                 "low": float(tick[3]),
-                "close": float(tick[4])
+                "close": float(tick[4]),
+                "volume": float(tick[5])
             })
         logger.info(f"Loaded {len(historical_klines)} historical candles to prime RSI RMA smoothing.")
     except Exception as e:
